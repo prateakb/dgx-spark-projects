@@ -1,0 +1,87 @@
+services:
+  # --------------------------------------------------------
+  # PROFILE: gguf (Inference Engine Only)
+  # --------------------------------------------------------
+  qwen3-gguf:
+    build:
+      context: .
+      dockerfile: spark-gguf.Dockerfile
+    image: spark-llama-cpp:latest
+    container_name: qwen3-coder-gguf
+    profiles: ["gguf"]
+    runtime: nvidia
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models
+    command: >
+      -m /models/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+      --host 0.0.0.0
+      --port 8080
+      -c 65536
+      -ngl 999
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # --------------------------------------------------------
+  # PROFILE: vllm (Inference Engine Only)
+  # --------------------------------------------------------
+  qwen3-vllm:
+    image: scitrera/dgx-spark-vllm:0.14.0-t4
+    container_name: qwen3-coder-vllm
+    profiles: ["vllm"]
+    runtime: nvidia
+    ipc: host  
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    command: >
+          vllm serve Qwen/Qwen3-Coder-Next-FP8 
+          --host 0.0.0.0 
+          --port 8000
+          --dtype auto 
+          --kv-cache-dtype fp8
+          --gpu-memory-utilization 0.9 
+          --max-model-len 131072 
+          --trust-remote-code
+          --enable-auto-tool-choice 
+          --tool-call-parser qwen3_coder
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # --------------------------------------------------------
+  # PROFILE: proxy (Independent Proxy)
+  # --------------------------------------------------------
+  claude-proxy:
+    build:
+      context: .
+      dockerfile: claude-proxy.Dockerfile
+    container_name: claude-code-proxy
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8083
+      - PREFERRED_PROVIDER=openai
+      # Dynamically point to whichever engine is up. 
+      # Logic: Use a single alias or environment variable for the engine URL
+      - OPENAI_BASE_URL=${ENGINE_URL:-http://qwen3-vllm:8000/v1}
+      - OPENAI_API_KEY=sk-local-test
+      - BIG_MODEL=${MODEL_NAME:-Qwen/Qwen3-Coder-Next-FP8}
+      - SMALL_MODEL=${MODEL_NAME:-Qwen/Qwen3-Coder-Next-FP8}
+      - CLAUDE_MODEL_ALIAS=claude-sonnet-4-6
