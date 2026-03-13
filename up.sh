@@ -2,56 +2,59 @@
 set -e
 
 echo "========================================================"
-echo " DGX Spark Qwen3-Coder-Next Endpoint Setup"
+echo " DGX Spark: Modular Endpoint Manager"
 echo "========================================================"
 
-# Default to the stable GGUF profile if no argument is passed
+# Default variables
 PROFILE=${1:-gguf}
+MODEL_DIR="./models"
+GGUF_MODEL="Qwen3-Coder-Next-UD-Q4_K_XL.gguf"
 
-# Tear down existing profiles to free up the proxy port (8083)
-echo "Cleaning up any existing containers..."
-docker compose --profile '*' down
-
-if [ "$PROFILE" == "gguf" ]; then
-    echo "Starting the stable llama.cpp GGUF route + Claude Proxy..."
-    
-    mkdir -p ./models
-    
-    MODEL_PATH="./models/Qwen3-Coder-Next-UD-Q4_K_XL.gguf"
-    if [ ! -f "$MODEL_PATH" ]; then
-        echo "Downloading Q4 GGUF weights using uv..."
-        if ! command -v uv &> /dev/null; then
-            echo "Error: 'uv' is not installed. Please install it first."
-            exit 1
+case $PROFILE in
+    # --- ENGINE ACTIONS ---
+    "gguf")
+        echo ">>> Starting GGUF Engine (llama.cpp)..."
+        mkdir -p $MODEL_DIR
+        if [ ! -f "$MODEL_DIR/$GGUF_MODEL" ]; then
+            uvx --from huggingface_hub hf download unsloth/Qwen3-Coder-Next-GGUF $GGUF_MODEL --local-dir $MODEL_DIR
         fi
-        uvx --from huggingface_hub hf download unsloth/Qwen3-Coder-Next-GGUF Qwen3-Coder-Next-UD-Q4_K_XL.gguf --local-dir ./models
-    else
-        echo "Model found at $MODEL_PATH. Skipping download."
-    fi
+        docker compose --profile gguf up -d --build
+        echo "✅ GGUF Engine is up at http://localhost:8080"
+        ;;
 
-    echo "Building and launching containers..."
-    docker compose --profile gguf up -d --build
+    "vllm")
+        echo ">>> Starting vLLM Engine (FP8)..."
+        docker compose --profile vllm up -d --build
+        echo "✅ vLLM Engine is up at http://localhost:8000"
+        ;;
 
-    echo "========================================================"
-    echo "✅ Success! Stack is online."
-    echo "   - Native GGUF API: http://localhost:8080/v1"
-    echo "   - Claude Proxy:    http://localhost:8083/v1"
+    # --- PROXY ACTIONS ---
+    "proxy-up")
+        echo ">>> Starting Claude Proxy independently..."
+        # We start the proxy profile specifically
+        docker compose --profile proxy up -d --build
+        echo "✅ Proxy is up at http://localhost:8083"
+        ;;
 
-elif [ "$PROFILE" == "vllm" ]; then
-    echo "Starting the high-throughput vLLM FP8 route + Claude Proxy..."
-    
-    echo "Building and launching containers..."
-    docker compose --profile vllm up -d --build
+    "proxy-down")
+        echo ">>> Stopping Claude Proxy..."
+        docker compose stop claude-code-proxy
+        ;;
 
-    echo "========================================================"
-    echo "✅ Success! Stack is online."
-    echo "   - Native vLLM API: http://localhost:8000/v1"
-    echo "   - Claude Proxy:    http://localhost:8083/v1"
+    # --- UTILITIES ---
+    "down")
+        echo ">>> Shutting down EVERYTHING..."
+        docker compose --profile '*' down
+        ;;
 
-else
-    echo "Unknown profile: $PROFILE. Please use 'gguf' or 'vllm'."
-    exit 1
-fi
+    "logs")
+        docker compose logs -f
+        ;;
 
-echo "To view live inference logs, run: docker compose --profile $PROFILE logs -f"
+    *)
+        echo "Usage: $0 {gguf | vllm | proxy-up | proxy-down | down | logs}"
+        exit 1
+        ;;
+esac
+
 echo "========================================================"
