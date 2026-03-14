@@ -66,11 +66,21 @@ async def create_message(request: MessagesRequest, raw_request: Request):
                 litellm_request.get('model'), len(litellm_request['messages']), 
                 num_tools, 200
             )
+            # Request usage stats in the final stream chunk.
+            # Always enable for OpenAI-compatible backends (vLLM, NIM, etc).
+            litellm_request["stream_options"] = {"include_usage": True}
+            
+            # Pre-count input tokens so message_start has real values
+            try:
+                pre_input_tokens = litellm.token_counter(model="gpt-4", messages=litellm_request["messages"])
+            except Exception:
+                pre_input_tokens = 0
+
             # Added a timeout to prevent hanging on GPU warmup
             response_generator = await litellm.acompletion(**litellm_request, timeout=600)
             
             return StreamingResponse(
-                handle_streaming(response_generator, request),
+                handle_streaming(response_generator, request, pre_input_tokens),
                 media_type="text/event-stream"
             )
         else:
@@ -115,11 +125,19 @@ async def count_tokens(request: TokenCountRequest, raw_request: Request):
         num_tools = len(request.tools) if request.tools else 0
         log_request_beautifully("POST", raw_request.url.path, display_model, converted_request.get('model'), len(converted_request['messages']), num_tools, 200)
         
-        token_count = token_counter(
-            model=converted_request["model"],
-            messages=converted_request["messages"],
-            custom_llm_provider="openai"
-        )
+        # Use gpt-4 as a proxy tokenizer — LiteLLM doesn't have a tokenizer for
+        # local/NIM models like Qwen, but gpt-4 (cl100k_base) gives a close estimate.
+        try:
+            token_count = token_counter(
+                model=converted_request["model"],
+                messages=converted_request["messages"],
+                custom_llm_provider="openai"
+            )
+        except Exception:
+            token_count = token_counter(
+                model="gpt-4",
+                messages=converted_request["messages"],
+            )
         return TokenCountResponse(input_tokens=token_count)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

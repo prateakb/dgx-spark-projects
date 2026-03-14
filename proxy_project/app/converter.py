@@ -57,7 +57,10 @@ def coerce_tool_arguments(arguments: Any, tool_name: str = "") -> Any:
                     break
         if not arguments.get("prompt"):
             arguments["prompt"] = "Continue based on current context."
-        allowed_keys = ["prompt", "run_in_background"]
+        # "description" is required by Claude Code's Task Zod schema — keep it
+        if not arguments.get("description"):
+            arguments["description"] = arguments.get("prompt", "")[:100]
+        allowed_keys = ["description", "prompt", "run_in_background"]
         arguments = {k: v for k, v in arguments.items() if k in allowed_keys}
         arguments["run_in_background"] = False
 
@@ -178,6 +181,24 @@ def convert_anthropic_to_litellm(anthropic_request) -> Dict[str, Any]:
                 }
             })
 
+        # Convert Anthropic tool_choice → OpenAI tool_choice so vLLM's parser activates.
+        # NOTE: We intentionally never forward "required" — it triggers a vLLM 400 bug
+        # with Qwen3 models (github.com/vllm-project/vllm/issues/19051).
+        tc = anthropic_request.tool_choice  # Optional[Dict[str, Any]] from Pydantic model
+        if not tc:
+            litellm_request["tool_choice"] = "auto"
+        else:
+            tc_type = tc.get("type", "auto")
+            if tc_type == "none":
+                litellm_request["tool_choice"] = "none"
+            elif tc_type == "tool":
+                litellm_request["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": tc.get("name", "")}
+                }
+            else:  # "auto" or "any" → always use "auto" to avoid vLLM 400 bugs
+                litellm_request["tool_choice"] = "auto"
+
     return litellm_request
 
 def convert_litellm_to_anthropic(litellm_response, original_request) -> MessagesResponse:
@@ -211,7 +232,7 @@ def convert_litellm_to_anthropic(litellm_response, original_request) -> Messages
         )
     )
 
-async def handle_streaming(response_generator, original_request):
+async def handle_streaming(response_generator, original_request, pre_counted_input_tokens: int = 0):
     """
     Optimized streaming handler that ensures clean transitions 
     between text and tool_use blocks for Claude Code.
@@ -219,8 +240,8 @@ async def handle_streaming(response_generator, original_request):
     try:
         message_id = f"msg_{uuid.uuid4().hex[:24]}"
         
-        # 1. Start the Message
-        yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': message_id, 'type': 'message', 'role': 'assistant', 'model': original_request.model, 'content': [], 'usage': {'input_tokens': 0, 'output_tokens': 0}}})}\n\n"
+        # 1. Start the Message — use pre-counted input tokens so Claude Code sees real usage
+        yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': message_id, 'type': 'message', 'role': 'assistant', 'model': original_request.model, 'content': [], 'usage': {'input_tokens': pre_counted_input_tokens, 'output_tokens': 0}}})}\n\n"
         
         # 2. Start the mandatory Text Block (Index 0)
         yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
@@ -232,13 +253,19 @@ async def handle_streaming(response_generator, original_request):
         tool_name_map = {}       # Maps OpenAI tool index to name
         tool_buffer = {}         # Buffers JSON strings
         output_tokens = 0
+        input_tokens = 0
+        pending_finish_reason = None  # Deferred so the usage-only final chunk can arrive
 
         async for chunk in response_generator:
-            # Capture usage if available
+            # Always capture usage — vLLM sends it in a no-choices final chunk
             if hasattr(chunk, 'usage') and chunk.usage:
                 output_tokens = getattr(chunk.usage, 'completion_tokens', output_tokens)
+                input_tokens = getattr(chunk.usage, 'prompt_tokens', input_tokens)
 
             if not hasattr(chunk, 'choices') or not chunk.choices:
+                # This is the usage-only sentinel chunk — flush the deferred finish now
+                if pending_finish_reason:
+                    break
                 continue
 
             choice = chunk.choices[0]
@@ -283,27 +310,24 @@ async def handle_streaming(response_generator, original_request):
 
             # --- Finish Reason ---
             if finish_reason:
-                # 1. Close all tool blocks
+                # Close all tool blocks
                 for idx in sorted(tool_buffer.keys()):
-                    # Mapping local OpenAI index to the Anthropic index we emitted
-                    # If this was the first tool, its Anthropic index is 1.
                     anth_idx = list(tool_buffer.keys()).index(idx) + 1
-                    
                     raw_json = tool_buffer.get(idx, "{}")
-                    # FIX: Coerce strings, floats to ints, and sub-agent schemas
                     coerced = coerce_tool_arguments(raw_json, tool_name=tool_name_map.get(idx, ""))
-                    
-                    # Emit the final coerced JSON as one delta
                     yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': anth_idx, 'delta': {'type': 'input_json_delta', 'partial_json': json.dumps(coerced)}})}\n\n"
                     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': anth_idx})}\n\n"
 
-                # 2. Finalize the message
                 if not text_block_closed:
                     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
 
-                stop_map = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use"}
-                yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': stop_map.get(finish_reason, 'end_turn')}, 'usage': {'output_tokens': output_tokens}})}\n\n"
-                break
+                # Defer the final message_delta until usage chunk arrives (or fall through)
+                pending_finish_reason = finish_reason
+
+        # Emit final message_delta with real usage (after usage chunk was received)
+        finish = pending_finish_reason or "stop"
+        stop_map = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use"}
+        yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': stop_map.get(finish, 'end_turn')}, 'usage': {'input_tokens': input_tokens, 'output_tokens': output_tokens}})}\n\n"
 
         yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
         yield "data: [DONE]\n\n"
