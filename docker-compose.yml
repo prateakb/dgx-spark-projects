@@ -1,33 +1,5 @@
 services:
-  # --------------------------------------------------------
-  # PROFILE: gguf (Inference Engine Only)
-  # --------------------------------------------------------
-  qwen3-gguf:
-    build:
-      context: .
-      dockerfile: spark-gguf.Dockerfile
-    image: spark-llama-cpp:latest
-    container_name: qwen3-coder-gguf
-    profiles: ["gguf"]
-    runtime: nvidia
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./models:/models
-    command: >
-      -m /models/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
-      --host 0.0.0.0
-      --port 8080
-      -c 65536
-      -ngl 999
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+
 
   # --------------------------------------------------------
   # PROFILE: vllm (Inference Engine Only)
@@ -63,14 +35,77 @@ services:
               capabilities: [gpu]
 
   # --------------------------------------------------------
-  # PROFILE: proxy (Independent Proxy)
+  # PROFILE: gguf (llama.cpp Engine with Auto-Download)
+  # --------------------------------------------------------services:
+  # This service ensures the model is downloaded before the coder starts
+  # model-downloader:
+  #   image: python:3.11-slim
+  #   profiles: ["gguf"]
+  #   volumes:
+  #     - ~/.cache/huggingface:/root/.cache/huggingface
+  #     - ./models:/models
+  #   environment:
+  #     - HF_HUB_ENABLE_HF_TRANSFER=1
+  #   command: >
+  #     sh -c "pip install -U huggingface_hub[hf_transfer] && 
+  #            hf download unsloth/Qwen3.5-122B-A10B-GGUF --include 'Q4_K_M/*.gguf' --local-dir /models"
+
+  qwen3-coder-gguf:
+    build:
+      context: .
+      dockerfile: llama-server-gguf.Dockerfile
+    profiles: ["gguf"]
+    # depends_on:
+    #   model-downloader:
+    #     condition: service_completed_successfully
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./models:/models
+    ports:
+      - "8080:8080"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      # - NCCL_P2P_DISABLE=1    # Sometimes helps stability
+      - NCCL_IB_DISABLE=1     # Disable InfiniBand if not used
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # GB10 Optimized Command
+    command: >
+      --model /models/Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
+      --port 8080
+      --host 0.0.0.0
+      --alias Qwen3-Coder-Next
+      -ngl 999
+      -fa on
+      --no-mmap
+      --mlock
+      --numa distribute
+      --ctx-size 131072
+      --cache-type-k q4_0
+      --cache-type-v q4_0
+      --batch-size 4096
+      --ubatch-size 1024
+      --threads 20
+      --parallel 2
+      --cont-batching
+      --override-kv "tokenizer.ggml.max_context_length=int:131072" 
+  # --------------------------------------------------------
+  # PROFILE: proxy (Independent Proxy to Claude Code/Roo)
   # --------------------------------------------------------
   claude-proxy:
     build:
       context: .
       dockerfile: claude-proxy.Dockerfile
     container_name: claude-code-proxy
-    profiles: ["proxy"]
+    profiles: ["proxy"] # Added to match your --profile proxy flag
     restart: unless-stopped
     ports:
       - "8083:8083"
@@ -78,10 +113,11 @@ services:
       - HOST=0.0.0.0
       - PORT=8083
       - PREFERRED_PROVIDER=openai
-      # Dynamically point to whichever engine is up. 
-      # Logic: Use a single alias or environment variable for the engine URL
-      - OPENAI_BASE_URL=${ENGINE_URL:-http://qwen3-vllm:8000/v1}
-      - OPENAI_API_KEY=sk-local-test
-      - BIG_MODEL=${MODEL_NAME:-Qwen/Qwen3-Coder-Next-FP8}
-      - SMALL_MODEL=${MODEL_NAME:-Qwen/Qwen3-Coder-Next-FP8}
-      - CLAUDE_MODEL_ALIAS=claude-sonnet-4-6
+      - VLLM_MAX_CTX=65536
+      # 1. Update hostname to match the service name: qwen3-coder-gguf
+      # 2. Append /v1 so the proxy finds the OpenAI-compatible endpoints
+      - OPENAI_BASE_URL=http://qwen3-8b:8080/v1
+      - OPENAI_API_KEY=sk-local-spark
+      # Set these to the name you want the proxy to present to Claude Code
+      - BIG_MODEL=qwen3-coder
+      - SMALL_MODEL=qwen3-coder

@@ -1,0 +1,60 @@
+services:
+
+  qwen3-coder-nvfp4:
+    image: scitrera/dgx-spark-vllm:0.14.0-t4
+    container_name: qwen3-coder-nvfp4
+    runtime: nvidia
+    ipc: host
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - qwen3-coder-nvfp4-net
+    command: >
+          vllm serve GadflyII/Qwen3-Coder-Next-NVFP4
+          --host 0.0.0.0
+          --port 8000
+          --served-model-name Qwen3-Coder-Next-NVFP4
+          --gpu-memory-utilization 0.7
+          --max-model-len 131072
+          --kv-cache-dtype fp8
+          --trust-remote-code
+          --enable-auto-tool-choice
+          --tool-call-parser qwen3_coder
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  claude-proxy:
+    build:
+      context: .
+      dockerfile: claude-proxy.Dockerfile
+    container_name: claude-code-proxy
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    networks:
+      - qwen3-coder-nvfp4-net
+    depends_on:
+      - qwen3-coder-nvfp4
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8083
+      - PREFERRED_PROVIDER=openai
+      - VLLM_MAX_CTX=131072
+      - OPENAI_BASE_URL=http://qwen3-coder-nvfp4:8000/v1
+      - OPENAI_API_KEY=sk-local-spark
+      - BIG_MODEL=Qwen3-Coder-Next-NVFP4
+      - SMALL_MODEL=Qwen3-Coder-Next-NVFP4
+      - CLAUDE_MODEL_ALIAS=claude-sonnet-4-6
+
+networks:
+
+  qwen3-coder-nvfp4-net:
+    driver: bridge
