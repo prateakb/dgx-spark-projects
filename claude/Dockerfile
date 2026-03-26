@@ -1,22 +1,27 @@
+# Stage 1: Install channel plugin dependencies using official Bun image
+FROM oven/bun:1.1 AS channel-deps
+WORKDIR /app
+COPY channel/package.json channel/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY channel/ ./
+
+# Stage 2: Final image with Claude Code + channel plugin
 FROM node:22-slim
 
 # Install system dependencies (tmux, curl, git, jq for hooks)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tmux curl git jq unzip && \
+    apt-get install -y --no-install-recommends tmux curl git jq && \
     rm -rf /var/lib/apt/lists/*
-
-# Install Bun (needed to run the channel plugin as a subprocess)
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Copy and install the channel plugin (lockfile first for layer caching)
-COPY channel/package.json channel/bun.lock /opt/zulip-channel/
-WORKDIR /opt/zulip-channel
-RUN bun install --frozen-lockfile
-COPY channel/ /opt/zulip-channel/
+# Copy pre-built channel plugin (with node_modules) from stage 1
+COPY --from=channel-deps /app /opt/zulip-channel
+
+# Copy Bun binary from stage 1 (needed at runtime to run the plugin)
+COPY --from=channel-deps /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=channel-deps /usr/local/bin/bunx /usr/local/bin/bunx
 
 # Copy startup script
 COPY claude/start.sh /usr/local/bin/start.sh
