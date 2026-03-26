@@ -1,15 +1,12 @@
 services:
 
   # --- Cloudflare Tunnel ---
-  # Exposes the self-hosted Zulip instance to the internet via Cloudflare Tunnel.
-  # Create a tunnel in the Cloudflare Zero Trust dashboard, then set
-  # CLOUDFLARE_TUNNEL_TOKEN in .env to the token shown on the install page.
+  # Exposes services to the internet without opening ports or managing TLS.
+  # Create a tunnel at: Cloudflare Zero Trust → Networks → Tunnels → Create
   #
-  # In the dashboard, add a public hostname route:
-  #   zulip.yourdomain.com  →  http://zulip:443  (or https://zulip:443 if Zulip has TLS)
-  #
-  # If you also want to expose the proxy API externally:
-  #   api.yourdomain.com    →  http://claude-code-proxy:8083
+  # Add public hostname routes in the dashboard:
+  #   zulip.yourdomain.com  →  http://zulip:443
+  #   api.yourdomain.com    →  http://claude-code-proxy:8083  (optional)
   cloudflare-tunnel:
     image: cloudflare/cloudflared:latest
     container_name: cloudflare-tunnel
@@ -20,46 +17,46 @@ services:
     networks:
       - qwen3-coder-nvfp4-net
 
-  # --- Zulip MCP Channel Plugin ---
-  zulip-channel:
-    build: ./channel
-    container_name: zulip-channel
-    restart: unless-stopped
-    environment:
-      ZULIP_URL: ${ZULIP_URL}
-      ZULIP_EMAIL: ${ZULIP_BOT_EMAIL}
-      ZULIP_API_KEY: ${ZULIP_BOT_API_KEY}
-      ZULIP_STREAM: ${ZULIP_STREAM:-claude-code}
-      ZULIP_TOPIC: ${ZULIP_TOPIC:-tasks}
-      ALLOWLIST_FILE: /data/allowlist.json
-    volumes:
-      - channel-data:/data
-
-  # --- Claude Code Session ---
+  # --- Claude Code + Zulip Channel Plugin ---
+  # Single container: Claude Code spawns the channel plugin as an MCP subprocess
+  # (stdio transport — must be in the same container, not a separate service).
+  #
+  # Auth: mount your host ~/.claude dir (run `claude auth login` on host first).
+  # Or auth interactively: docker exec -it claude-code-zulip claude auth login
   claude-code:
-    build: ./claude
+    build:
+      context: .
+      dockerfile: claude/Dockerfile
+      additional_contexts:
+        channel: ./channel
     container_name: claude-code-zulip
     restart: unless-stopped
     environment:
+      # --- Inference routing (proxy → Qwen on vLLM) ---
       - ANTHROPIC_BASE_URL=http://claude-code-proxy:8083
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-local-spark}
+      # --- Permissions ---
       - CLAUDE_PERMISSIONS_MODE=${CLAUDE_PERMISSIONS_MODE:-unattended}
-      # Zulip credentials for the permission relay hook (supervised mode)
+      # --- Zulip (used by channel plugin + permission hook) ---
       - ZULIP_URL=${ZULIP_URL}
       - ZULIP_EMAIL=${ZULIP_BOT_EMAIL}
       - ZULIP_API_KEY=${ZULIP_BOT_API_KEY}
       - ZULIP_STREAM=${ZULIP_STREAM:-claude-code}
       - ZULIP_TOPIC=${ZULIP_TOPIC:-tasks}
+      - ALLOWLIST_FILE=/data/allowlist.json
       - APPROVAL_TIMEOUT=${APPROVAL_TIMEOUT:-60}
     volumes:
+      # Auth: mount host credentials (run `claude auth login` on DGX host first)
+      - ${CLAUDE_AUTH_DIR:-~/.claude}:/root/.claude
+      # Workspace the Claude Code session operates on
       - ./workspace:/workspace
+      # Permission relay hook (supervised mode)
       - ./hooks:/hooks:ro
-      - channel-data:/root/.claude/channels/zulip
+      # Persistent allowlist for sender pairing
+      - channel-data:/data
     working_dir: /workspace
     networks:
       - qwen3-coder-nvfp4-net
-    depends_on:
-      - zulip-channel
     stdin_open: true
     tty: true
 
