@@ -13,6 +13,12 @@ chown -R claude:claude \
   /data \
   2>/dev/null || true
 
+# Copy .mcp.json into workspace AFTER volume mount (build-time COPY gets hidden)
+if [ ! -f /workspace/.mcp.json ]; then
+  cp /opt/zulip-channel/mcp.json /workspace/.mcp.json
+  chown claude:claude /workspace/.mcp.json
+fi
+
 # /hooks is read-only mount — skip chown, just ensure it's readable
 chmod -R a+r /hooks 2>/dev/null || true
 
