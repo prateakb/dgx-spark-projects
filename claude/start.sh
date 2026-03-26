@@ -68,6 +68,6 @@ rm -f "$TMUX_SOCK"
 # Start tmux in the FOREGROUND with a known socket path.
 # -S uses a shared socket so docker exec can find it.
 # The foreground tmux process keeps the container alive.
-# If Claude exits, the window shows a prompt to restart.
+# No pipes — claude needs a direct PTY for interactive stdin.
 exec tmux -S "$TMUX_SOCK" new-session -s claude -n code \
-  "claude ${CLAUDE_ARGS[*]} 2>&1 | tee -a $LOG; echo; echo '[claude-start] Claude exited. Press Enter to restart or Ctrl+C to stop.'; read; exec $0"
+  "claude ${CLAUDE_ARGS[*]}; echo; echo '[claude-start] Claude exited. Press Enter to restart or Ctrl+C to stop.'; read; exec $0"
