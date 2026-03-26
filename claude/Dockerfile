@@ -10,7 +10,7 @@ FROM node:22-slim
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl git jq gosu && \
+    apt-get install -y --no-install-recommends curl git jq gosu tmux && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
