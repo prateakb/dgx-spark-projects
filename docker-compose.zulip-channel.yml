@@ -47,6 +47,8 @@ services:
       - ./workspace:/workspace
       - ./hooks:/hooks:ro
       - channel-data:/data
+      # Persist OAuth credentials across container restarts
+      - claude-auth:/home/claude/.claude
     working_dir: /workspace
     networks:
       - qwen3-coder-nvfp4-net
@@ -55,6 +57,7 @@ services:
 
 volumes:
   channel-data:
+  claude-auth:
 
 networks:
   qwen3-coder-nvfp4-net:
