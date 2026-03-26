@@ -38,9 +38,10 @@ else
 fi
 
 # --- Build Claude args ---
+# Development channels are passed directly to --dangerously-load-development-channels
+# (not via --channels, which is for official allowlisted plugins only)
 CLAUDE_ARGS=(
-  --dangerously-load-development-channels
-  --channels "plugin:zulip@local"
+  --dangerously-load-development-channels "plugin:zulip@local"
 )
 
 if [ "$PERMISSIONS_MODE" = "unattended" ]; then
