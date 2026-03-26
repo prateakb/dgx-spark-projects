@@ -29,8 +29,7 @@ RUN usermod -l claude -d /home/claude -m node && \
     groupmod -n claude node
 
 # Create all directories the user needs and set ownership
-RUN mkdir -p /home/claude/.claude \
-             /home/claude/.config \
+RUN mkdir -p /home/claude/.config \
              /home/claude/.npm \
              /home/claude/.cache \
              /workspace \
@@ -42,6 +41,10 @@ RUN mkdir -p /home/claude/.claude \
       /workspace \
       /data \
       /hooks
+
+# No ~/.claude mount needed — ANTHROPIC_API_KEY env var is sufficient.
+# Claude Code checks env vars before looking for credential files.
+ENV DISABLE_AUTOUPDATER=1
 
 # Copy scripts
 COPY claude/start.sh /usr/local/bin/start.sh

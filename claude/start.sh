@@ -22,13 +22,10 @@ log() { echo "[claude-start] $*" | tee -a "$LOG"; }
 PERMISSIONS_MODE="${CLAUDE_PERMISSIONS_MODE:-unattended}"
 
 # --- Auth check ---
-CLAUDE_HOME="$HOME/.claude"
-if [ -f "$CLAUDE_HOME/credentials.json" ]; then
-  log "Found mounted credentials at $CLAUDE_HOME/credentials.json"
-elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-  log "Using ANTHROPIC_API_KEY (channels may require 'claude auth login')"
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  log "Auth: ANTHROPIC_API_KEY set (routing to proxy at ${ANTHROPIC_BASE_URL:-default})"
 else
-  log "WARNING: No auth found. Run: docker exec -it claude-code-zulip claude auth login"
+  log "WARNING: ANTHROPIC_API_KEY not set"
 fi
 
 # --- Build Claude args ---

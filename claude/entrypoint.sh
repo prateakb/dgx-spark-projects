@@ -9,7 +9,6 @@ set -e
 
 # Fix ownership on mounted volumes
 chown -R claude:claude \
-  /home/claude/.claude \
   /workspace \
   /data \
   2>/dev/null || true

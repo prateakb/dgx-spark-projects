@@ -23,7 +23,6 @@ services:
   #
   # Connect:  docker exec -it claude-code-zulip tmux -S /tmp/claude-tmux attach -t claude
   # Detach:   Ctrl+B, D
-  # Auth:     docker exec -it claude-code-zulip claude auth login
   claude-code:
     build:
       context: .
@@ -45,7 +44,6 @@ services:
       - ALLOWLIST_FILE=/data/allowlist.json
       - APPROVAL_TIMEOUT=${APPROVAL_TIMEOUT:-60}
     volumes:
-      - ${CLAUDE_AUTH_DIR:-~/.claude}:/home/claude/.claude
       - ./workspace:/workspace
       - ./hooks:/hooks:ro
       - channel-data:/data
