@@ -12,10 +12,11 @@ ENV PATH="/root/.bun/bin:${PATH}"
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Copy and install the channel plugin
-COPY channel/ /opt/zulip-channel/
+# Copy and install the channel plugin (lockfile first for layer caching)
+COPY channel/package.json channel/bun.lock /opt/zulip-channel/
 WORKDIR /opt/zulip-channel
-RUN bun install
+RUN bun install --frozen-lockfile
+COPY channel/ /opt/zulip-channel/
 
 # Copy startup script
 COPY claude/start.sh /usr/local/bin/start.sh
