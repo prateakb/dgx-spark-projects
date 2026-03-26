@@ -17,5 +17,8 @@ chown -R claude:claude \
 # /hooks is read-only mount — skip chown, just ensure it's readable
 chmod -R a+r /hooks 2>/dev/null || true
 
+# Ensure /tmp is writable by claude (for tmux socket)
+chmod 1777 /tmp 2>/dev/null || true
+
 # Drop to claude user and run start.sh
 exec gosu claude /usr/local/bin/start.sh "$@"

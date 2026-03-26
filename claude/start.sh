@@ -2,11 +2,11 @@
 # Launches Claude Code inside tmux with the Zulip channel plugin.
 #
 # Usage from host:
-#   docker exec -it claude-code-zulip tmux attach -t claude
+#   docker exec -it claude-code-zulip tmux -S /tmp/claude-tmux attach -t claude
 #   (detach: Ctrl+B, D)
 #
 #   Open a shell alongside Claude:
-#   docker exec -it claude-code-zulip tmux new-window -t claude
+#   docker exec -it claude-code-zulip tmux -S /tmp/claude-tmux new-window -t claude
 #
 #   Run one-off commands:
 #   docker exec -it claude-code-zulip bash
@@ -14,6 +14,7 @@
 # Auth:
 #   docker exec -it claude-code-zulip claude auth login
 
+TMUX_SOCK="/tmp/claude-tmux"
 LOG="/tmp/claude-start.log"
 
 log() { echo "[claude-start] $*" | tee -a "$LOG"; }
@@ -60,15 +61,16 @@ log "Claude Code version: $(claude --version 2>&1 || echo 'unknown')"
 log "Launching: claude ${CLAUDE_ARGS[*]}"
 log ""
 log "=== To connect ==="
-log "  docker exec -it claude-code-zulip tmux attach -t claude"
+log "  docker exec -it claude-code-zulip tmux -S $TMUX_SOCK attach -t claude"
 log "  (detach: Ctrl+B, D)"
-log "  (new shell: docker exec -it claude-code-zulip tmux new-window -t claude)"
 log "=================="
 
-# Start tmux with Claude Code in the first window
-tmux new-session -d -s claude -n code \
-  "claude ${CLAUDE_ARGS[*]} 2>&1 | tee -a $LOG; echo '[claude-start] Claude exited. Press Enter to restart or Ctrl+C to stop.'; read; exec $0"
+# Clean up stale socket
+rm -f "$TMUX_SOCK"
 
-# Keep the container alive by waiting on the tmux server.
-# If tmux dies, the container exits and docker restarts it.
-exec tmux wait-for claude-exit
+# Start tmux in the FOREGROUND with a known socket path.
+# -S uses a shared socket so docker exec can find it.
+# The foreground tmux process keeps the container alive.
+# If Claude exits, the window shows a prompt to restart.
+exec tmux -S "$TMUX_SOCK" new-session -s claude -n code \
+  "claude ${CLAUDE_ARGS[*]} 2>&1 | tee -a $LOG; echo; echo '[claude-start] Claude exited. Press Enter to restart or Ctrl+C to stop.'; read; exec $0"
