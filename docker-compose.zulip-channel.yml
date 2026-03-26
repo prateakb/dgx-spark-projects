@@ -45,7 +45,7 @@ services:
       - APPROVAL_TIMEOUT=${APPROVAL_TIMEOUT:-60}
     volumes:
       # Auth: mount host credentials (run `claude auth login` on DGX host first)
-      - ${CLAUDE_AUTH_DIR:-~/.claude}:/root/.claude
+      - ${CLAUDE_AUTH_DIR:-~/.claude}:/home/claude/.claude
       # Workspace the Claude Code session operates on
       - ./workspace:/workspace
       # Permission relay hook (supervised mode)
