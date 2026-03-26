@@ -13,12 +13,12 @@ ENV PATH="/root/.bun/bin:${PATH}"
 RUN npm install -g @anthropic-ai/claude-code
 
 # Copy and install the channel plugin
-COPY --from=channel /app /opt/zulip-channel
+COPY channel/ /opt/zulip-channel/
 WORKDIR /opt/zulip-channel
 RUN bun install
 
-# Copy startup script and hooks
-COPY start.sh /usr/local/bin/start.sh
+# Copy startup script
+COPY claude/start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
 
 WORKDIR /workspace

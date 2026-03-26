@@ -27,8 +27,6 @@ services:
     build:
       context: .
       dockerfile: claude/Dockerfile
-      additional_contexts:
-        channel: ./channel
     container_name: claude-code-zulip
     restart: unless-stopped
     environment:
