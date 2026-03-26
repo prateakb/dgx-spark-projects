@@ -41,10 +41,27 @@ case $PROFILE in
         docker compose stop claude-code-proxy
         ;;
 
+    # --- ZULIP CHANNEL ---
+    "zulip")
+        echo ">>> Starting Zulip Channel Relay..."
+        docker compose -f docker-compose.zulip-channel.yml up -d --build
+        echo "✅ Zulip channel is up (check logs with: $0 zulip-logs)"
+        ;;
+
+    "zulip-down")
+        echo ">>> Stopping Zulip Channel..."
+        docker compose -f docker-compose.zulip-channel.yml down
+        ;;
+
+    "zulip-logs")
+        docker compose -f docker-compose.zulip-channel.yml logs -f
+        ;;
+
     # --- UTILITIES ---
     "down")
         echo ">>> Shutting down EVERYTHING..."
         docker compose --profile '*' down
+        docker compose -f docker-compose.zulip-channel.yml down 2>/dev/null || true
         ;;
 
     "logs")
@@ -52,7 +69,7 @@ case $PROFILE in
         ;;
 
     *)
-        echo "Usage: $0 {gguf | vllm | proxy-up | proxy-down | down | logs}"
+        echo "Usage: $0 {gguf | vllm | proxy-up | proxy-down | zulip | zulip-down | zulip-logs | down | logs}"
         exit 1
         ;;
 esac

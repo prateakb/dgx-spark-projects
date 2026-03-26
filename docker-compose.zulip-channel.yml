@@ -1,0 +1,49 @@
+services:
+
+  zulip-channel:
+    build: ./channel
+    container_name: zulip-channel
+    restart: unless-stopped
+    environment:
+      ZULIP_URL: ${ZULIP_URL}
+      ZULIP_EMAIL: ${ZULIP_BOT_EMAIL}
+      ZULIP_API_KEY: ${ZULIP_BOT_API_KEY}
+      ZULIP_STREAM: ${ZULIP_STREAM:-claude-code}
+      ZULIP_TOPIC: ${ZULIP_TOPIC:-tasks}
+      ALLOWLIST_FILE: /data/allowlist.json
+    volumes:
+      - channel-data:/data
+
+  claude-code:
+    build: ./claude
+    container_name: claude-code-zulip
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_BASE_URL=http://claude-code-proxy:8083
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-local-spark}
+      - CLAUDE_PERMISSIONS_MODE=${CLAUDE_PERMISSIONS_MODE:-unattended}
+      # Zulip credentials for the permission relay hook (supervised mode)
+      - ZULIP_URL=${ZULIP_URL}
+      - ZULIP_EMAIL=${ZULIP_BOT_EMAIL}
+      - ZULIP_API_KEY=${ZULIP_BOT_API_KEY}
+      - ZULIP_STREAM=${ZULIP_STREAM:-claude-code}
+      - ZULIP_TOPIC=${ZULIP_TOPIC:-tasks}
+      - APPROVAL_TIMEOUT=${APPROVAL_TIMEOUT:-60}
+    volumes:
+      - ./workspace:/workspace
+      - ./hooks:/hooks:ro
+      - channel-data:/root/.claude/channels/zulip
+    working_dir: /workspace
+    networks:
+      - qwen3-coder-nvfp4-net
+    depends_on:
+      - zulip-channel
+    stdin_open: true
+    tty: true
+
+volumes:
+  channel-data:
+
+networks:
+  qwen3-coder-nvfp4-net:
+    external: true
