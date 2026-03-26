@@ -23,11 +23,10 @@ COPY --from=channel-deps /app /opt/zulip-channel
 COPY --from=channel-deps /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=channel-deps /usr/local/bin/bunx /usr/local/bin/bunx
 
-# Create non-root user (Claude Code refuses --dangerously-skip-permissions as root)
-ARG CLAUDE_UID=1000
-ARG CLAUDE_GID=1000
-RUN groupadd -g ${CLAUDE_GID} claude && \
-    useradd -m -u ${CLAUDE_UID} -g ${CLAUDE_GID} -s /bin/bash claude
+# Rename the existing node user (uid 1000) to claude
+# (Claude Code refuses --dangerously-skip-permissions as root)
+RUN usermod -l claude -d /home/claude -m node && \
+    groupmod -n claude node
 
 # Create all directories the user needs and set ownership
 RUN mkdir -p /home/claude/.claude \
