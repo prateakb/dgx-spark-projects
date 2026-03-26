@@ -1,5 +1,26 @@
 services:
 
+  # --- Cloudflare Tunnel ---
+  # Exposes the self-hosted Zulip instance to the internet via Cloudflare Tunnel.
+  # Create a tunnel in the Cloudflare Zero Trust dashboard, then set
+  # CLOUDFLARE_TUNNEL_TOKEN in .env to the token shown on the install page.
+  #
+  # In the dashboard, add a public hostname route:
+  #   zulip.yourdomain.com  →  http://zulip:443  (or https://zulip:443 if Zulip has TLS)
+  #
+  # If you also want to expose the proxy API externally:
+  #   api.yourdomain.com    →  http://claude-code-proxy:8083
+  cloudflare-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - qwen3-coder-nvfp4-net
+
+  # --- Zulip MCP Channel Plugin ---
   zulip-channel:
     build: ./channel
     container_name: zulip-channel
@@ -14,6 +35,7 @@ services:
     volumes:
       - channel-data:/data
 
+  # --- Claude Code Session ---
   claude-code:
     build: ./claude
     container_name: claude-code-zulip
