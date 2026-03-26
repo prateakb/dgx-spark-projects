@@ -1,76 +1,13 @@
 services:
 
-  # =============================================
-  # ZULIP SERVER (self-hosted)
-  # =============================================
-  zulip:
-    image: zulip/docker-zulip:9.0-0
-    container_name: zulip
-    restart: unless-stopped
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - zulip-data:/data
-    environment:
-      SETTING_EXTERNAL_HOST: ${ZULIP_EXTERNAL_HOST:-localhost}
-      SETTING_ZULIP_ADMINISTRATOR: ${ZULIP_ADMIN_EMAIL:-admin@localhost}
-      SECRETS_email_password: ${ZULIP_EMAIL_PASSWORD:-changeme}
-      SECRETS_secret_key: ${ZULIP_SECRET_KEY:-changeme-secret}
-      SECRETS_postgres_password: ${ZULIP_PG_PASSWORD:-changeme-pg}
-      SECRETS_rabbitmq_password: ${ZULIP_RABBIT_PASSWORD:-changeme-rabbit}
-      SECRETS_redis_password: ${ZULIP_REDIS_PASSWORD:-changeme-redis}
-      # Disable TLS inside container — Cloudflare handles it
-      DISABLE_HTTPS: "true"
-    depends_on:
-      - database
-      - cache
-      - rabbitmq
-    networks:
-      - qwen3-coder-nvfp4-net
-
-  database:
-    image: postgres:14
-    container_name: zulip-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: zulip
-      POSTGRES_USER: zulip
-      POSTGRES_PASSWORD: ${ZULIP_PG_PASSWORD:-changeme-pg}
-    volumes:
-      - pg-data:/var/lib/postgresql/data
-    networks:
-      - qwen3-coder-nvfp4-net
-
-  cache:
-    image: redis:7
-    container_name: zulip-redis
-    restart: unless-stopped
-    command: redis-server --requirepass ${ZULIP_REDIS_PASSWORD:-changeme-redis}
-    networks:
-      - qwen3-coder-nvfp4-net
-
-  rabbitmq:
-    image: rabbitmq:3.12
-    container_name: zulip-rabbitmq
-    restart: unless-stopped
-    environment:
-      RABBITMQ_DEFAULT_USER: zulip
-      RABBITMQ_DEFAULT_PASS: ${ZULIP_RABBIT_PASSWORD:-changeme-rabbit}
-    networks:
-      - qwen3-coder-nvfp4-net
-
-  # =============================================
-  # CLOUDFLARE TUNNEL
-  # =============================================
-  # Exposes Zulip to the internet without opening router ports.
-  # TLS terminates at Cloudflare — traffic inside Docker is plain HTTP.
+  # --- Cloudflare Tunnel ---
+  # Exposes your existing Zulip to the internet without opening router ports.
   #
   # Setup:
   #   1. Cloudflare Zero Trust → Networks → Tunnels → Create
   #   2. Copy the tunnel token to .env as CLOUDFLARE_TUNNEL_TOKEN
   #   3. Add public hostname in the dashboard:
-  #        zulip.yourdomain.com → http://zulip:80
+  #        zulip.yourdomain.com → http://<your-zulip-host>:<port>
   cloudflare-tunnel:
     image: cloudflare/cloudflared:latest
     container_name: cloudflare-tunnel
@@ -78,17 +15,13 @@ services:
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      - zulip
     networks:
       - qwen3-coder-nvfp4-net
 
-  # =============================================
-  # CLAUDE CODE + ZULIP CHANNEL PLUGIN
-  # =============================================
+  # --- Claude Code + Zulip Channel Plugin ---
   # Single container: Claude Code spawns the channel plugin as an MCP subprocess.
   #
-  # Connect:  docker exec -it claude-code-zulip tmux attach -t claude
+  # Connect:  docker exec -it claude-code-zulip tmux -S /tmp/claude-tmux attach -t claude
   # Detach:   Ctrl+B, D
   # Auth:     docker exec -it claude-code-zulip claude auth login
   claude-code:
@@ -103,8 +36,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-local-spark}
       # --- Permissions ---
       - CLAUDE_PERMISSIONS_MODE=${CLAUDE_PERMISSIONS_MODE:-unattended}
-      # --- Zulip (used by channel plugin + permission hook) ---
-      - ZULIP_URL=http://zulip:80
+      # --- Zulip (channel plugin + permission hook) ---
+      - ZULIP_URL=${ZULIP_URL}
       - ZULIP_EMAIL=${ZULIP_BOT_EMAIL}
       - ZULIP_API_KEY=${ZULIP_BOT_API_KEY}
       - ZULIP_STREAM=${ZULIP_STREAM:-claude-code}
@@ -117,16 +50,12 @@ services:
       - ./hooks:/hooks:ro
       - channel-data:/data
     working_dir: /workspace
-    depends_on:
-      - zulip
     networks:
       - qwen3-coder-nvfp4-net
     stdin_open: true
     tty: true
 
 volumes:
-  zulip-data:
-  pg-data:
   channel-data:
 
 networks:
