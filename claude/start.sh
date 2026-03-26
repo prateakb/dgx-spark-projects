@@ -32,7 +32,7 @@ fi
 # Development channels are passed directly to --dangerously-load-development-channels
 # (not via --channels, which is for official allowlisted plugins only)
 CLAUDE_ARGS=(
-  --dangerously-load-development-channels "plugin:zulip@local"
+  --dangerously-load-development-channels server:zulip
 )
 
 if [ "$PERMISSIONS_MODE" = "unattended" ]; then

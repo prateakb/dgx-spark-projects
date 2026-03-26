@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zulip": {
+      "command": "bun",
+      "args": ["run", "/opt/zulip-channel/index.ts"]
+    }
+  }
+}

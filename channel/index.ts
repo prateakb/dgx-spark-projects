@@ -1,6 +1,9 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { ZulipClient } from "./zulip-client.js";
 import { Allowlist } from "./allowlist.js";
 
@@ -11,50 +14,77 @@ const zulip = new ZulipClient({
   apiKey: process.env.ZULIP_API_KEY!,
 });
 
-const server = new McpServer({
-  name: "zulip-channel",
-  version: "0.1.0",
-  capabilities: {
-    "claude/channel": {}, // registers this as a push channel, not just a tool server
-    tools: {},
-  },
-  instructions: `
-    You receive messages from Zulip. Each event has: sender_email, stream, topic, content.
-    Use the reply tool to respond to the same stream and topic.
-    Only act on messages from allowlisted senders.
-    If a sender is unknown, respond with a pairing code and wait for confirmation.
-  `,
-});
-
-// Tool Claude calls to send a reply back to Zulip
-server.tool(
-  "reply",
+const server = new Server(
+  { name: "zulip", version: "0.1.0" },
   {
-    content: z.string().describe("Message to send back to Zulip"),
-    stream: z.string().describe("Zulip stream name"),
-    topic: z.string().describe("Zulip topic"),
-  },
-  async ({ content, stream, topic }) => {
-    await zulip.sendMessage({ type: "stream", to: stream, topic, content });
-    return { content: [{ type: "text", text: "sent" }] };
+    capabilities: {
+      experimental: {
+        "claude/channel": {},
+      },
+      tools: {},
+    },
+    instructions: `
+      You receive messages from Zulip. Each event has: sender_email, stream, topic, content.
+      Use the reply tool to respond to the same stream and topic.
+      Only act on messages from allowlisted senders.
+      If a sender is unknown, respond with a pairing code and wait for confirmation.
+    `,
   }
 );
 
-// Tool to confirm a pairing code from the terminal
-server.tool(
-  "confirm_pairing",
-  {
-    code: z.string().describe("The pairing code to confirm"),
-  },
-  async ({ code }) => {
+// List available tools
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: "reply",
+      description: "Send a message back to a Zulip stream/topic",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          content: { type: "string", description: "Message to send back to Zulip" },
+          stream: { type: "string", description: "Zulip stream name" },
+          topic: { type: "string", description: "Zulip topic" },
+        },
+        required: ["content", "stream", "topic"],
+      },
+    },
+    {
+      name: "confirm_pairing",
+      description: "Confirm a pairing code to allowlist a Zulip sender",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          code: { type: "string", description: "The pairing code to confirm" },
+        },
+        required: ["code"],
+      },
+    },
+  ],
+}));
+
+// Handle tool calls
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  if (name === "reply") {
+    const { content, stream, topic } = args as { content: string; stream: string; topic: string };
+    await zulip.sendMessage({ type: "stream", to: stream, topic, content });
+    return { content: [{ type: "text", text: "sent" }] };
+  }
+
+  if (name === "confirm_pairing") {
+    const { code } = args as { code: string };
     const email = allowlist.confirmPairing(code);
     if (!email) {
       return { content: [{ type: "text", text: `Invalid or expired pairing code: ${code}` }] };
     }
     return { content: [{ type: "text", text: `Paired successfully: ${email} is now allowlisted` }] };
   }
-);
 
+  return { content: [{ type: "text", text: `Unknown tool: ${name}` }] };
+});
+
+// Connect transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
@@ -93,7 +123,6 @@ async function startPolling() {
         if (senderEmail === process.env.ZULIP_EMAIL) continue;
 
         if (!allowlist.has(senderEmail)) {
-          // Pairing flow: unknown sender gets a one-time code
           const code = allowlist.generatePairingCode(senderEmail);
           await zulip.sendMessage({
             type: "stream",
@@ -104,17 +133,21 @@ async function startPolling() {
           continue;
         }
 
-        // Push the event into Claude's running session
-        await server.notification("channel/message", {
-          sender: senderEmail,
-          stream,
-          topic,
-          content,
+        // Push the event into Claude's running session via channel notification
+        await server.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: content,
+            meta: {
+              sender: senderEmail,
+              stream,
+              topic,
+            },
+          },
         });
       }
     } catch (err) {
       console.error("[zulip-channel] Polling error:", err);
-      // Wait before retrying to avoid tight error loops
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
