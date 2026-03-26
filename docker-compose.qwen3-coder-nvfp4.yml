@@ -57,4 +57,5 @@ services:
 networks:
 
   qwen3-coder-nvfp4-net:
+    name: qwen3-coder-nvfp4-net
     driver: bridge

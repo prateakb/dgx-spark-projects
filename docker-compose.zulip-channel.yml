@@ -63,4 +63,5 @@ volumes:
 
 networks:
   qwen3-coder-nvfp4-net:
-    external: true
+    name: qwen3-coder-nvfp4-net
+    driver: bridge
