@@ -2,7 +2,7 @@
 FROM oven/bun:1.1 AS channel-deps
 WORKDIR /app
 COPY channel/package.json channel/bun.lock ./
-RUN bun install --frozen-lockfile
+RUN bun install
 COPY channel/ ./
 
 # Stage 2: Final image with Claude Code + channel plugin
