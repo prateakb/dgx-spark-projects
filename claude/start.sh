@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launches Claude Code in tmux with the Zulip channel plugin.
+# Launches Claude Code with the Zulip channel plugin.
 #
 # The channel plugin runs as a subprocess of Claude Code (MCP stdio transport).
 # Claude Code spawns `bun run /opt/zulip-channel/index.ts` and communicates
@@ -23,18 +23,20 @@
 #   ZULIP_STREAM            - Target stream (default: claude-code)
 #   ZULIP_TOPIC             - Target topic (default: tasks)
 
-set -euo pipefail
+LOG="/var/log/claude-start.log"
+
+log() { echo "[claude-start] $*" | tee -a "$LOG"; }
 
 PERMISSIONS_MODE="${CLAUDE_PERMISSIONS_MODE:-unattended}"
 
 # --- Auth check ---
 if [ -f /root/.claude/credentials.json ]; then
-  echo "[claude-start] Found mounted credentials at /root/.claude/credentials.json"
+  log "Found mounted credentials at /root/.claude/credentials.json"
 elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "[claude-start] Using ANTHROPIC_API_KEY (channels may require 'claude auth login')"
-  echo "[claude-start] To auth interactively: docker exec -it claude-code-zulip claude auth login"
+  log "Using ANTHROPIC_API_KEY (channels may require 'claude auth login')"
+  log "To auth interactively: docker exec -it claude-code-zulip claude auth login"
 else
-  echo "[claude-start] WARNING: No auth found. Run: docker exec -it claude-code-zulip claude auth login"
+  log "WARNING: No auth found. Run: docker exec -it claude-code-zulip claude auth login"
 fi
 
 # --- Build Claude args ---
@@ -44,20 +46,27 @@ CLAUDE_ARGS=(
 )
 
 if [ "$PERMISSIONS_MODE" = "unattended" ]; then
-  echo "[claude-start] Mode: unattended (--dangerously-skip-permissions)"
+  log "Mode: unattended (--dangerously-skip-permissions)"
   CLAUDE_ARGS+=(--dangerously-skip-permissions)
 else
-  echo "[claude-start] Mode: supervised (permission relay via Zulip)"
+  log "Mode: supervised (permission relay via Zulip)"
 fi
 
-echo "[claude-start] Channel plugin: /opt/zulip-channel/index.ts"
-echo "[claude-start] Proxy: ${ANTHROPIC_BASE_URL:-not set}"
-echo "[claude-start] Zulip: ${ZULIP_URL:-not set} → #${ZULIP_STREAM:-claude-code} > ${ZULIP_TOPIC:-tasks}"
-echo "[claude-start] Launching Claude Code..."
+log "Channel plugin: /opt/zulip-channel/index.ts"
+log "Proxy: ${ANTHROPIC_BASE_URL:-not set}"
+log "Zulip: ${ZULIP_URL:-not set} → #${ZULIP_STREAM:-claude-code} > ${ZULIP_TOPIC:-tasks}"
 
-# Start Claude Code in a tmux session so the container stays alive
-tmux new-session -d -s claude \
-  "claude ${CLAUDE_ARGS[*]}"
+# --- Verify claude is installed ---
+if ! command -v claude &>/dev/null; then
+  log "ERROR: claude command not found"
+  exit 1
+fi
+log "Claude Code version: $(claude --version 2>&1 || echo 'unknown')"
 
-# Keep the container running by attaching to tmux
-exec tmux attach -t claude
+# --- Launch ---
+# Run claude directly (no tmux) so stdout/stderr go to docker logs.
+# The container's tty: true + stdin_open: true in compose keep it interactive.
+# To attach: docker attach claude-code-zulip
+# To detach without stopping: Ctrl+P, Ctrl+Q
+log "Launching: claude ${CLAUDE_ARGS[*]}"
+exec claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG"
