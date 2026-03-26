@@ -10,7 +10,7 @@ FROM node:22-slim
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl git jq sudo && \
+    apt-get install -y --no-install-recommends curl git jq gosu && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
@@ -24,15 +24,32 @@ COPY --from=channel-deps /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=channel-deps /usr/local/bin/bunx /usr/local/bin/bunx
 
 # Create non-root user (Claude Code refuses --dangerously-skip-permissions as root)
-RUN useradd -m -s /bin/bash claude && \
-    mkdir -p /home/claude/.claude /workspace /data /hooks && \
-    chown -R claude:claude /home/claude /opt/zulip-channel /workspace /data /hooks
+ARG CLAUDE_UID=1000
+ARG CLAUDE_GID=1000
+RUN groupadd -g ${CLAUDE_GID} claude && \
+    useradd -m -u ${CLAUDE_UID} -g ${CLAUDE_GID} -s /bin/bash claude
 
-# Copy startup script
+# Create all directories the user needs and set ownership
+RUN mkdir -p /home/claude/.claude \
+             /home/claude/.config \
+             /home/claude/.npm \
+             /home/claude/.cache \
+             /workspace \
+             /data \
+             /hooks && \
+    chown -R claude:claude \
+      /home/claude \
+      /opt/zulip-channel \
+      /workspace \
+      /data \
+      /hooks
+
+# Copy scripts
 COPY claude/start.sh /usr/local/bin/start.sh
-RUN chmod +x /usr/local/bin/start.sh
+COPY claude/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/entrypoint.sh
 
-USER claude
 WORKDIR /workspace
 
-ENTRYPOINT ["/usr/local/bin/start.sh"]
+# entrypoint.sh runs as root to fix volume ownership, then drops to claude user
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
