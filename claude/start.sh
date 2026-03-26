@@ -42,6 +42,13 @@ else
   log "Mode: supervised (permission relay via Zulip)"
 fi
 
+# Skip first-run setup wizard (theme, etc.)
+mkdir -p "$HOME/.claude"
+if [ ! -f "$HOME/.claude/settings.json" ]; then
+  echo '{"theme":"dark","hasCompletedOnboarding":true}' > "$HOME/.claude/settings.json"
+  log "Pre-seeded settings.json (skipping onboarding)"
+fi
+
 log "Running as: $(whoami) (uid=$(id -u))"
 log "Channel plugin: /opt/zulip-channel/index.ts"
 log "Proxy: ${ANTHROPIC_BASE_URL:-not set}"
